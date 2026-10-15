@@ -3,71 +3,361 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>When can you trust a machine-learned potential? A toy test</title>
+<title>Does a learned potential know when it is wrong?</title>
+<meta name="description" content="A small experiment: train a neural-network potential on bulk copper, then test it on structures it has never seen.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,500;8..60,650&display=swap" rel="stylesheet">
 <style>
-  :root { --fg:#1d2330; --muted:#5b6475; --bg:#fbfbfa; --card:#fff; --line:#e3e5ea; --accent:#2c6fbb; }
-  @media (prefers-color-scheme: dark) { :root { --fg:#e8eaf0; --muted:#a2a9b8; --bg:#14171e; --card:#1b1f29; --line:#2b3040; --accent:#6aa5e8; } }
-  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
-  main { max-width:760px; margin:0 auto; padding:32px 16px 64px; }
-  h1 { font-size:1.6rem; line-height:1.25; margin:0 0 8px; }
-  h2 { font-size:1.15rem; margin:32px 0 8px; }
-  p.lead { color:var(--muted); margin-top:0; }
-  figure { margin:16px 0; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; }
-  figure img { width:100%; height:auto; display:block; background:#fff; border-radius:4px; }
-  figcaption { color:var(--muted); font-size:.9rem; margin-top:8px; }
-  table { border-collapse:collapse; width:100%; font-size:.92rem; }
-  th, td { border-bottom:1px solid var(--line); padding:6px 8px; text-align:right; }
-  th:first-child, td:first-child { text-align:left; }
-  .note { border-left:3px solid var(--accent); padding:4px 12px; color:var(--muted); }
-  a { color:var(--accent); }
-  code { background:var(--card); border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:.9em; }
+  :root {
+    --paper:  #eef2f1;
+    --card:   #f8fbfa;
+    --ink:    #17232b;
+    --muted:  #51636b;
+    --line:   #cfdad7;
+    --patina: #2f7d70;   /* oxidized copper: what the model knows */
+    --copper: #b4622f;   /* bare copper: error */
+    --mist:   #dbe7e4;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --sans:  "Public Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:  #11191e;
+      --card:   #182229;
+      --ink:    #e6eeec;
+      --muted:  #9bacb2;
+      --line:   #2b3a42;
+      --patina: #5cbfae;
+      --copper: #e0895a;
+      --mist:   #1f2d34;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 400 1rem/1.65 var(--sans); }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 20px; }
+  header.hero { padding: 56px 0 8px; }
+  h1 { font: 650 clamp(2rem, 5.2vw, 3.3rem)/1.1 var(--serif); letter-spacing: -0.015em; margin: 0 0 16px; max-width: 18ch; }
+  .sub { font: 400 1.15rem/1.6 var(--serif); color: var(--muted); max-width: 62ch; margin: 0; }
+  .by { margin: 18px 0 0; color: var(--muted); font-size: .92rem; }
+  .by a { color: inherit; }
+
+  /* the one memorable element: five structures, each with its measured error */
+  .strip { margin: 36px 0 12px; display: grid; grid-template-columns: repeat(5, 1fr); border: 1px solid var(--line); border-radius: 10px; background: var(--card); overflow: hidden; }
+  .cell { padding: 18px 16px 20px; border-left: 1px solid var(--line); min-width: 0; }
+  .cell:first-child { border-left: 0; }
+  .cell.seen { background: var(--mist); }
+  .cell svg { display: block; width: 100%; max-width: 132px; height: auto; margin: 0 auto 12px; }
+  .cell h3 { font: 600 1rem/1.3 var(--serif); margin: 0 0 2px; }
+  .cell .what { font-size: .82rem; color: var(--muted); margin: 0 0 14px; min-height: 2.6em; line-height: 1.4; }
+  .bar { margin: 0 0 9px; }
+  .bar .lbl { display: flex; justify-content: space-between; font-size: .78rem; color: var(--muted); margin-bottom: 3px; gap: 6px; }
+  .bar .lbl b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .track { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .fill { height: 100%; width: 0; border-radius: 4px; }
+  .fill.err { background: var(--copper); }
+  .fill.unc { background: var(--patina); }
+  .loaded .fill { width: var(--w); transition: width 900ms cubic-bezier(.2,.7,.2,1); }
+  .strip-note { font-size: .85rem; color: var(--muted); margin: 0 0 8px; }
+  .key { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: .85rem; color: var(--muted); margin: 0 0 4px; }
+  .key i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+
+  section { padding: 40px 0 0; }
+  h2 { font: 650 1.5rem/1.25 var(--serif); letter-spacing: -0.01em; margin: 0 0 12px; }
+  p { margin: 0 0 14px; max-width: 68ch; }
+  .takeaway { font: 500 1.2rem/1.5 var(--serif); max-width: 52ch; }
+  dl { margin: 0; max-width: 68ch; }
+  dt { font-weight: 600; margin-top: 12px; }
+  dd { margin: 2px 0 0; color: var(--muted); }
+  figure { margin: 20px 0 0; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px; max-width: 640px; }
+  figure img { display: block; width: 100%; height: auto; }
+  figcaption { font-size: .85rem; color: #51636b; margin-top: 8px; }
+  table { border-collapse: collapse; width: 100%; max-width: 680px; font-size: .92rem; margin-top: 22px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-weight: 600; color: var(--muted); font-size: .85rem; }
+  .limits { border-left: 3px solid var(--copper); padding: 2px 0 2px 16px; }
+  .limits p { max-width: 70ch; }
+  pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font: 400 .88rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width: 680px; }
+  a { color: var(--patina); text-underline-offset: 3px; }
+  a:focus-visible { outline: 2px solid var(--copper); outline-offset: 3px; border-radius: 2px; }
+
+  .steps { list-style: none; counter-reset: step; margin: 20px 0 0; padding: 0; max-width: 760px; }
+  .steps > li { counter-increment: step; position: relative; padding: 0 0 26px 52px; border-left: 2px solid var(--line); margin-left: 15px; }
+  .steps > li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .steps > li::before { content: counter(step); position: absolute; left: -17px; top: -2px; width: 32px; height: 32px; border-radius: 50%; background: var(--patina); color: var(--paper); font: 600 .95rem/32px var(--sans); text-align: center; }
+  .steps h3 { font: 600 1.1rem/1.3 var(--serif); margin: 0 0 6px; }
+  .steps p { margin: 0 0 10px; }
+  .small { font-size: .85rem; color: var(--muted); }
+  details { margin: 6px 0 0; max-width: 700px; }
+  summary { cursor: pointer; color: var(--patina); font-size: .92rem; font-weight: 500; width: fit-content; }
+  summary:focus-visible { outline: 2px solid var(--copper); outline-offset: 3px; border-radius: 2px; }
+  details pre { margin: 8px 0 0; font-size: .8rem; max-width: 100%; }
+  code { font: 400 .88em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--mist); padding: 1px 5px; border-radius: 4px; }
+  .range { position: relative; height: 74px; margin: 14px 0 6px; max-width: 640px; }
+  .rbar { position: absolute; top: 22px; height: 12px; border-radius: 6px; }
+  .rbar.train { background: var(--patina); }
+  .rbar.test { background: var(--copper); }
+  .rl { position: absolute; top: 0; font-size: .78rem; color: var(--ink); white-space: nowrap; }
+  .rl.low { top: 38px; }
+  .axis { position: absolute; left: 0; right: 0; bottom: 0; height: 18px; border-top: 1px solid var(--line); }
+  .axis span { position: absolute; top: 3px; font-size: .72rem; color: var(--muted); transform: translateX(-50%); }
+  .axis span:first-child { transform: none; }
+  .axis span:last-child { transform: translateX(-100%); }
+  figure.wide { max-width: 100%; }
+  @media (max-width: 560px) {
+    .steps > li { padding-left: 40px; margin-left: 12px; }
+    .rl { font-size: .7rem; }
+  }
+  footer { margin: 56px 0 0; padding: 20px 0 48px; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
+
+  @media (max-width: 900px) {
+    .strip { grid-template-columns: repeat(2, 1fr); }
+    .cell { border-left: 0; border-top: 1px solid var(--line); }
+    .cell:nth-child(2n) { border-left: 1px solid var(--line); }
+    .cell:nth-child(-n+2) { border-top: 0; }
+    .cell:last-child { grid-column: 1 / -1; border-left: 0; }
+  }
+  @media (max-width: 480px) {
+    .strip { grid-template-columns: 1fr; }
+    .cell, .cell:nth-child(2n) { border-left: 0; border-top: 1px solid var(--line); }
+    .cell:nth-child(-n+2) { border-top: 1px solid var(--line); }
+    .cell:first-child { border-top: 0; }
+    .cell .what { min-height: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) { .loaded .fill { transition: none; } }
 </style>
 </head>
 <body>
-<main>
-  <h1>When can you trust a machine-learned potential? A toy test</h1>
-  <p class="lead">Raja Ahmad Mahmood &middot; a small learning project, built to understand one problem from the field of atomistic simulation.</p>
+<div class="wrap">
+  <header class="hero">
+    <h1>Does a learned potential know when it is wrong?</h1>
+    <p class="sub">I trained a neural-network potential on bulk copper only, then showed it structures it had never seen. Its error grew roughly 260-fold on a small cluster, and the disagreement between eight copies of the model, trained from different random starts, grew with it.</p>
+    <p class="by">A small learning project by <a href="https://github.com/Ahmadbey678">Raja Ahmad Mahmood</a>. Code and data: <a href="https://github.com/Ahmadbey678/mlip-trust-demo">github.com/Ahmadbey678/mlip-trust-demo</a></p>
 
-  <h2>The question</h2>
-  <p>Accurate quantum calculations (DFT) are too slow for long simulations. A machine-learned interatomic potential (MLIP) is a neural network trained on DFT-like data that predicts the energy of a set of atoms much faster. The risk is that it is only reliable on atom arrangements similar to its training data. This project tests that on a toy system and checks whether the model can tell when it is out of its depth.</p>
+    <div class="strip" id="strip" role="group" aria-label="Error and model uncertainty for five structure types"></div>
+    <p class="key"><span><i style="background:var(--copper)"></i>Actual error against the reference energy</span><span><i style="background:var(--patina)"></i>The model's own uncertainty (ensemble disagreement)</span></p>
+    <p class="strip-note">Values are meV per atom on a log scale from 1 to 1000. The shaded column is the only structure type present in training.</p>
+  </header>
 
-  <h2>Setup</h2>
-  <ul>
-    <li><strong>Ground truth:</strong> ASE's EMT potential for copper, a cheap stand-in for DFT.</li>
-    <li><strong>Training data:</strong> 300 bulk copper cells with random lattice constants and random atomic displacements. Bulk only.</li>
-    <li><strong>Model:</strong> Behler-Parrinello-style symmetry-function descriptors (radial and angular), fed to an ensemble of 8 small neural networks that predict energy per atom.</li>
-    <li><strong>Tests:</strong> new bulk cells (same type as training), a vacancy, a surface slab, a small cluster, and strongly compressed bulk (none seen in training).</li>
-    <li><strong>Uncertainty:</strong> the standard deviation across the 8 networks.</li>
-  </ul>
+  <section>
+    <h2>Why this matters</h2>
+    <p>Quantum-mechanical energy calculations such as DFT are accurate but too slow for long simulations. A machine-learned interatomic potential is trained on such calculations and then predicts energies far faster. Its weak point is generalization: it can be wrong on atom arrangements unlike its training data and give no sign of it.</p>
+    <p class="takeaway">This experiment asks whether a cheap warning signal exists, using a system small enough to run in 20 seconds.</p>
+  </section>
 
-  <h2>Result 1: error grows on structures the model has not seen</h2>
-  <figure>
-    <img src="fig_error_by_structure.png" alt="Bar chart on a log scale of actual error and ensemble uncertainty for five structure types">
-    <figcaption>Log scale. On bulk copper the error is about 1.6 meV/atom. On a cluster it is about 400 meV/atom, roughly 250 times larger.</figcaption>
-  </figure>
+  <section>
+    <h2>How it works</h2>
+    <p>The whole experiment is one Python file (<code>mlip_demo.py</code>) that runs in about 20 seconds. These are its five steps, with the code that does each one.</p>
+    <ol class="steps">
+      <li>
+        <h3>Build structures</h3>
+        <p>Training data is 300 copper cells (32 atoms each) with the lattice constant drawn between 3.45 and 3.75 &Aring; and every atom nudged by up to 0.10 &Aring;. The test sets are built the same way, with a vacancy, a surface, a cluster, or a lattice squeezed beyond the training range.</p>
+        <div class="range" role="img" aria-label="Lattice constants: training 3.45 to 3.75 angstrom, compressed test 3.05 to 3.30 angstrom">
+          <div class="rbar train" style="left:56.25%;width:37.5%"></div>
+          <div class="rbar test" style="left:6.25%;width:31.25%"></div>
+          <span class="rl" style="left:56.25%">Training 3.45 to 3.75</span>
+          <span class="rl low" style="left:6.25%">Compressed test 3.05 to 3.30</span>
+          <div class="axis"><span style="left:0%">3.0</span><span style="left:25%">3.2</span><span style="left:50%">3.4</span><span style="left:75%">3.6</span><span style="left:100%">3.8 &Aring;</span></div>
+        </div>
+        <p class="small">Vacancy, slab and cluster cells use 3.58 to 3.64 &Aring;, inside the training range. For them the arrangement is new, not the spacing.</p>
+        <details><summary>Show code</summary><pre>def make_bulk(n, rattle, a_range):
+    out = []
+    for _ in range(n):
+        a = RNG.uniform(*a_range)
+        at = bulk(&quot;Cu&quot;, &quot;fcc&quot;, a=a, cubic=True).repeat((2, 2, 2))
+        at.rattle(stdev=RNG.uniform(*rattle), seed=int(RNG.integers(1e9)))
+        out.append(at)
+    return out</pre></details>
+      </li>
+      <li>
+        <h3>Compute reference energies</h3>
+        <p>ASE's EMT potential gives the energy of each structure. This stands in for DFT, which I did not run.</p>
+        <details><summary>Show code</summary><pre>def energy_per_atom(atoms):
+    atoms.calc = EMT()
+    return atoms.get_potential_energy() / len(atoms)</pre></details>
+      </li>
+      <li>
+        <h3>Describe each structure with numbers</h3>
+        <p>For every atom, symmetry functions summarize its neighbours within 5 &Aring;: 5 radial functions (how many neighbours sit at which distances) and 6 angular ones (the angles between neighbour pairs). Averaged over atoms, each structure becomes 11 numbers that do not change if you rotate it or relabel its atoms.</p>
+        <details><summary>Show code</summary><pre>def descriptors(atoms):
+    &quot;&quot;&quot;Per-atom symmetry functions (radial G2 and angular G4), averaged over atoms.&quot;&quot;&quot;
+    n = len(atoms)
+    # neighbours within cutoff, with periodic images
+    from ase.neighborlist import neighbor_list
+    i, j, d, D = neighbor_list(&quot;ijdD&quot;, atoms, RC)
+    nrad = len(ETAS)  # 5 radial functions (eta, Rs pairs), then len(ANG) angular ones
+    feats = np.zeros((n, nrad + len(ANG)))
+    for a in range(n):
+        m = i == a
+        da, Da = d[m], D[m]
+        fc = cutoff(da)
+        for k, (eta, rs) in enumerate(zip(ETAS, RS)):
+            feats[a, k] = np.sum(np.exp(-eta * (da - rs) ** 2) * fc)
+        # angular terms over neighbour pairs
+        if len(da) &gt; 1:
+            cosm = (Da @ Da.T) / np.outer(da, da)
+            iu = np.triu_indices(len(da), 1)
+            c = cosm[iu]
+            r1, r2 = da[iu[0]], da[iu[1]]
+            r12 = np.linalg.norm(Da[iu[0]] - Da[iu[1]], axis=1)
+            f = cutoff(r1) * cutoff(r2) * cutoff(r12)
+            for k, (eta, zeta, lam) in enumerate(ANG):
+                t = (1 + lam * c).clip(0) ** zeta * np.exp(-eta * (r1**2 + r2**2 + r12**2)) * f
+                feats[a, nrad + k] = 2 ** (1 - zeta) * np.sum(t)
+    return feats.mean(axis=0)</pre></details>
+      </li>
+      <li>
+        <h3>Train eight networks</h3>
+        <p>Each network has two hidden layers of 32 units and predicts energy per atom from the 11 numbers. All eight train on the same 300 structures and differ only in their random starting weights.</p>
+        <details><summary>Show code</summary><pre>sc = StandardScaler().fit(Xtr)
+models = []
+for seed in range(8):
+    m = MLPRegressor(hidden_layer_sizes=(32, 32), activation=&quot;tanh&quot;, solver=&quot;lbfgs&quot;, max_iter=3000,
+                     tol=1e-10, random_state=seed, alpha=1e-4)
+    m.fit(sc.transform(Xtr), ytr)
+    models.append(m)</pre></details>
+      </li>
+      <li>
+        <h3>Test on unseen structures and compare</h3>
+        <p>The average of the eight predictions is the model's answer. Its distance from the reference energy is the error. The standard deviation across the eight is the uncertainty, which needs no reference energy to compute.</p>
+        <details><summary>Show code</summary><pre>preds = np.array([m.predict(sc.transform(X)) for m in models])
+    mean, std = preds.mean(0), preds.std(0)
+    err = np.abs(mean - y)</pre></details>
+      </li>
+    </ol>
+  </section>
 
-  <h2>Result 2: the ensemble disagreement tracks the error</h2>
-  <figure>
-    <img src="fig_uncertainty_vs_error.png" alt="Scatter plot of ensemble standard deviation versus absolute error on log axes">
-    <figcaption>Each point is one test structure. Higher ensemble disagreement goes with higher error (Spearman correlation 0.91 over all 150 test structures).</figcaption>
-  </figure>
-  <table id="tbl"><thead><tr><th>Test set</th><th>n</th><th>MAE (meV/atom)</th><th>Ensemble std (meV/atom)</th></tr></thead><tbody></tbody></table>
+  <section>
+    <h2>What the model predicts</h2>
+    <p>Each panel plots the model's energy against the reference energy for one test set. A point on the dashed line is a perfect prediction. Bulk copper sits on the line. On the cluster the model predicts about 0.43 eV/atom where the reference is about 0.82, so the errors are systematic, not random noise: mostly too low on the slab, cluster and compressed bulk.</p>
+    <figure class="wide">
+      <img src="fig_parity.png" alt="Five small plots of predicted against reference energy per atom. Bulk points lie on the diagonal; vacancy points sit above it; slab, cluster and compressed bulk points fall below it, with the cluster far below.">
+      <figcaption>Energy per atom in eV. Dashed line: prediction equals reference. Axes differ between panels.</figcaption>
+    </figure>
+  </section>
 
-  <h2>Limits of this toy</h2>
-  <p class="note">EMT is a simple analytic model, not DFT, and the system is one element. The network predicts energy per atom from descriptors averaged over atoms, not a sum of per-atom contributions, and it does not predict forces. Each test set is small, and the cluster and vacancy sets are one structure type with small random displacements, so they are not a broad sample. The uncertainty is useful as a warning here, but it overestimates the error on the surface slab, so it is a warning signal, not a calibrated error bar. The first training run used a different optimizer (Adam) and converged poorly; I switched to L-BFGS and kept that result.</p>
+  <section>
+    <h2>Does the disagreement track the error?</h2>
+    <p>Mostly yes. Across all 150 test structures the rank correlation between ensemble disagreement and absolute error is 0.91. Structures the models agree on are predicted well, and large disagreement goes with large error.</p>
+    <figure>
+      <img src="fig_uncertainty_vs_error.png" alt="Scatter plot on log axes of ensemble standard deviation against absolute error for 150 test structures; the five structure types form separate groups rising together.">
+      <figcaption>One point per test structure. Both axes are logarithmic.</figcaption>
+    </figure>
+    <table>
+      <thead><tr><th>Test set</th><th>Structures</th><th>Error (meV/atom)</th><th>Uncertainty (meV/atom)</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </section>
 
-  <h2>Code</h2>
-  <p><code>mlip_demo.py</code> runs the experiment in about 20 seconds; <code>make_figures.py</code> draws the figures. Install with <code>pip install ase scikit-learn scipy matplotlib</code>.</p>
-</main>
+  <section>
+    <h2>What this does not show</h2>
+    <div class="limits">
+      <p>The reference is EMT, a simple analytic model, not DFT, and the system is one element. The network predicts energy per atom from descriptors averaged over atoms, not a sum of per-atom contributions, and it does not predict forces. Each test set is small, and the vacancy, slab and cluster sets are one structure type with small random displacements.</p>
+      <p>The ensemble disagreement works as a warning, not a calibrated error bar. On the surface slab it overstates the error about twelve times (113 against 9.7 meV/atom), and on the vacancy it understates it (7.1 against 11.0).</p>
+      <p>The numbers for the small test sets are sensitive to the random initialization. While preparing this page I removed 20 unused, always-zero input columns from the descriptor array, which changed the random starting weights, and reran. The vacancy error moved from 4.9 to 11.0 meV/atom and the slab error from 19.5 to 9.7, so those two swapped places. Bulk stayed lowest, the cluster and compressed bulk stayed highest, and the correlation stayed at 0.91. The page shows the second run. My very first run used the Adam optimizer, converged poorly, and was replaced by L-BFGS.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Run it</h2>
+    <pre>git clone https://github.com/Ahmadbey678/mlip-trust-demo
+cd mlip-trust-demo
+pip install -r requirements.txt
+python mlip_demo.py       # about 20 seconds, writes results.json
+python make_figures.py</pre>
+  </section>
+
+  <footer>Raja Ahmad Mahmood. MIT licensed.</footer>
+</div>
+
 <script>
-fetch("results.json").then(r => r.json()).then(R => {
-  const tb = document.querySelector("#tbl tbody");
-  Object.keys(R).filter(k => !k.startsWith("_")).forEach(k => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${k}</td><td>${R[k].n}</td><td>${R[k].mae_meV_per_atom.toFixed(1)}</td><td>${R[k].mean_ensemble_std_meV.toFixed(1)}</td>`;
-    tb.appendChild(tr);
+/* Values from results.json (seeded run of mlip_demo.py). */
+const DATA = [
+  { name: "Bulk copper",       what: "Same kind of structure as the training data", n: 60, mae: 1.49,   std: 1.15,   seen: true,  draw: "bulk" },
+  { name: "Vacancy",           what: "One atom removed from the lattice",           n: 20, mae: 11.00,   std: 7.13,   seen: false, draw: "vacancy" },
+  { name: "Surface slab",      what: "Four layers with empty space above",         n: 20, mae: 9.74,  std: 113.21, seen: false, draw: "slab" },
+  { name: "Small cluster",     what: "Thirteen atoms with no bulk around them",    n: 20, mae: 389.20, std: 325.80, seen: false, draw: "cluster" },
+  { name: "Compressed bulk",   what: "Lattice squeezed beyond the training range", n: 30, mae: 166.46, std: 225.32, seen: false, draw: "compressed" }
+];
+
+/* small fixed offsets so the "bulk" sketches look rattled, like the data */
+const J = [[2,-1],[-2,2],[1,2],[-1,-2],[2,1],[-2,-1],[1,-2],[-1,1],[2,2],[-2,-2]];
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function atoms(kind) {
+  const svg = el("svg", { viewBox: "0 0 120 120", role: "img", "aria-hidden": "true" });
+  const P = "var(--patina)", C = "var(--copper)";
+  const dot = (x, y, fill, r = 6) => el("circle", { cx: x, cy: y, r: r, fill: fill }, svg);
+  if (kind === "bulk" || kind === "vacancy") {
+    let i = 0;
+    for (let gy = 0; gy < 5; gy++) for (let gx = 0; gx < 5; gx++) {
+      const x = 20 + gx * 20, y = 20 + gy * 20;
+      if (kind === "vacancy" && gx === 2 && gy === 2) {
+        el("circle", { cx: x, cy: y, r: 6, fill: "none", stroke: C, "stroke-width": 1.6, "stroke-dasharray": "3 3" }, svg);
+      } else {
+        const j = J[i++ % J.length];
+        dot(x + j[0], y + j[1], P);
+      }
+    }
+  } else if (kind === "slab") {
+    el("line", { x1: 8, y1: 50, x2: 112, y2: 50, stroke: C, "stroke-width": 1.2, "stroke-dasharray": "4 4" }, svg);
+    [58, 74, 90, 106].forEach((y, row) => {
+      for (let k = 0; k < 5; k++) {
+        const x = 20 + k * 20 + (row % 2 ? 10 : 0);
+        if (x > 108) continue;
+        dot(x, y, row === 0 ? C : P, 5.5);
+      }
+    });
+  } else if (kind === "cluster") {
+    dot(60, 60, P, 7);
+    for (let k = 0; k < 6; k++) {
+      const a = k * Math.PI / 3;
+      dot(60 + 22 * Math.cos(a), 60 + 22 * Math.sin(a), P, 6.5);
+    }
+    for (let k = 0; k < 6; k++) {
+      const a = Math.PI / 6 + k * Math.PI / 3;
+      dot(60 + 40 * Math.cos(a) * 0.95, 60 + 40 * Math.sin(a) * 0.95, C, 5);
+    }
+  } else if (kind === "compressed") {
+    for (let gy = 0; gy < 5; gy++) for (let gx = 0; gx < 5; gx++) {
+      dot(32 + gx * 14, 32 + gy * 14, C, 6);
+    }
+  }
+  return svg;
+}
+function pct(v) { return Math.max(2, Math.min(100, (Math.log10(v) / 3) * 100)); }
+function fmt(v) { return v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2); }
+
+const strip = document.getElementById("strip");
+DATA.forEach(d => {
+  const cell = document.createElement("div");
+  cell.className = "cell" + (d.seen ? " seen" : "");
+  cell.appendChild(atoms(d.draw));
+  const h = document.createElement("h3"); h.textContent = d.name; cell.appendChild(h);
+  const w = document.createElement("p"); w.className = "what"; w.textContent = d.what; cell.appendChild(w);
+  [["Error", d.mae, "err"], ["Uncertainty", d.std, "unc"]].forEach(([label, v, cls]) => {
+    const b = document.createElement("div"); b.className = "bar";
+    b.innerHTML = '<div class="lbl"><span>' + label + '</span><b>' + fmt(v) + '</b></div><div class="track"><div class="fill ' + cls + '" style="--w:' + pct(v) + '%"></div></div>';
+    cell.appendChild(b);
   });
-}).catch(() => { document.getElementById("tbl").style.display = "none"; });
+  strip.appendChild(cell);
+});
+
+const rows = document.getElementById("rows");
+DATA.forEach(d => {
+  const tr = document.createElement("tr");
+  tr.innerHTML = "<td>" + d.name + "</td><td>" + d.n + "</td><td>" + fmt(d.mae) + "</td><td>" + fmt(d.std) + "</td>";
+  rows.appendChild(tr);
+});
+
+requestAnimationFrame(() => requestAnimationFrame(() => document.body.classList.add("loaded")));
 </script>
 </body>
 </html>

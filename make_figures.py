@@ -20,3 +20,17 @@ ax.set_xscale("log"); ax.set_yscale("log")
 ax.set_xlabel("Ensemble std (meV/atom)"); ax.set_ylabel("Absolute error (meV/atom)")
 ax.set_title(f"Uncertainty vs error (Spearman = {R['_spearman']:.2f})", fontsize=10)
 ax.legend(fontsize=7); plt.tight_layout(); plt.savefig("fig_uncertainty_vs_error.png", dpi=160)
+
+# parity plot: predicted vs reference energy per atom, one panel per test set
+fig, axes = plt.subplots(1, 5, figsize=(13, 2.9))
+for ax, k in zip(axes, names):
+    t = np.array(R[k]["true"]); p = np.array(R[k]["pred"])
+    lo, hi = min(t.min(), p.min()), max(t.max(), p.max())
+    pad = 0.05 * (hi - lo) + 1e-3
+    ax.plot([lo - pad, hi + pad], [lo - pad, hi + pad], color="#888", lw=1, ls="--", zorder=1)
+    ax.scatter(t, p, s=12, color="#2f7d70", alpha=0.85, zorder=2)
+    ax.set_title(k, fontsize=9)
+    ax.set_xlabel("Reference (eV/atom)", fontsize=8)
+    ax.tick_params(labelsize=7)
+axes[0].set_ylabel("Model prediction (eV/atom)", fontsize=8)
+plt.tight_layout(); plt.savefig("fig_parity.png", dpi=160)

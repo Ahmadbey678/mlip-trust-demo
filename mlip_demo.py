@@ -1,4 +1,4 @@
-"""Toy machine-learned interatomic potential (MLIP) and a test of when to trust it.
+"""Machine-learned interatomic potential (MLIP) demo: when can you trust it?
 
 Ground truth: ASE's EMT potential for copper (a cheap stand-in for DFT).
 Model: Behler-Parrinello-style symmetry-function descriptors -> small neural
@@ -29,13 +29,12 @@ def cutoff(r):
 
 def descriptors(atoms):
     """Per-atom symmetry functions (radial G2 and angular G4), averaged over atoms."""
-    pos = atoms.get_positions()
     n = len(atoms)
     # neighbours within cutoff, with periodic images
     from ase.neighborlist import neighbor_list
     i, j, d, D = neighbor_list("ijdD", atoms, RC)
-    feats = np.zeros((n, len(ETAS) * len(RS) // 5 * 5 + len(ANG)))
-    nrad = len(ETAS)  # pair (eta, Rs) zipped, 5 radial functions
+    nrad = len(ETAS)  # 5 radial functions (eta, Rs pairs), then len(ANG) angular ones
+    feats = np.zeros((n, nrad + len(ANG)))
     for a in range(n):
         m = i == a
         da, Da = d[m], D[m]
