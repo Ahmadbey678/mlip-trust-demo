@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>When can you trust a machine-learned potential? A toy test</title>
+<style>
+  :root { --fg:#1d2330; --muted:#5b6475; --bg:#fbfbfa; --card:#fff; --line:#e3e5ea; --accent:#2c6fbb; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e8eaf0; --muted:#a2a9b8; --bg:#14171e; --card:#1b1f29; --line:#2b3040; --accent:#6aa5e8; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { font-size:1.6rem; line-height:1.25; margin:0 0 8px; }
+  h2 { font-size:1.15rem; margin:32px 0 8px; }
+  p.lead { color:var(--muted); margin-top:0; }
+  figure { margin:16px 0; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  figure img { width:100%; height:auto; display:block; background:#fff; border-radius:4px; }
+  figcaption { color:var(--muted); font-size:.9rem; margin-top:8px; }
+  table { border-collapse:collapse; width:100%; font-size:.92rem; }
+  th, td { border-bottom:1px solid var(--line); padding:6px 8px; text-align:right; }
+  th:first-child, td:first-child { text-align:left; }
+  .note { border-left:3px solid var(--accent); padding:4px 12px; color:var(--muted); }
+  a { color:var(--accent); }
+  code { background:var(--card); border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:.9em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>When can you trust a machine-learned potential? A toy test</h1>
+  <p class="lead">Raja Ahmad Mahmood &middot; a small learning project, built to understand one problem from the field of atomistic simulation.</p>
+
+  <h2>The question</h2>
+  <p>Accurate quantum calculations (DFT) are too slow for long simulations. A machine-learned interatomic potential (MLIP) is a neural network trained on DFT-like data that predicts the energy of a set of atoms much faster. The risk is that it is only reliable on atom arrangements similar to its training data. This project tests that on a toy system and checks whether the model can tell when it is out of its depth.</p>
+
+  <h2>Setup</h2>
+  <ul>
+    <li><strong>Ground truth:</strong> ASE's EMT potential for copper, a cheap stand-in for DFT.</li>
+    <li><strong>Training data:</strong> 300 bulk copper cells with random lattice constants and random atomic displacements. Bulk only.</li>
+    <li><strong>Model:</strong> Behler-Parrinello-style symmetry-function descriptors (radial and angular), fed to an ensemble of 8 small neural networks that predict energy per atom.</li>
+    <li><strong>Tests:</strong> new bulk cells (same type as training), a vacancy, a surface slab, a small cluster, and strongly compressed bulk (none seen in training).</li>
+    <li><strong>Uncertainty:</strong> the standard deviation across the 8 networks.</li>
+  </ul>
+
+  <h2>Result 1: error grows on structures the model has not seen</h2>
+  <figure>
+    <img src="fig_error_by_structure.png" alt="Bar chart on a log scale of actual error and ensemble uncertainty for five structure types">
+    <figcaption>Log scale. On bulk copper the error is about 1.6 meV/atom. On a cluster it is about 400 meV/atom, roughly 250 times larger.</figcaption>
+  </figure>
+
+  <h2>Result 2: the ensemble disagreement tracks the error</h2>
+  <figure>
+    <img src="fig_uncertainty_vs_error.png" alt="Scatter plot of ensemble standard deviation versus absolute error on log axes">
+    <figcaption>Each point is one test structure. Higher ensemble disagreement goes with higher error (Spearman correlation 0.91 over all 150 test structures).</figcaption>
+  </figure>
+  <table id="tbl"><thead><tr><th>Test set</th><th>n</th><th>MAE (meV/atom)</th><th>Ensemble std (meV/atom)</th></tr></thead><tbody></tbody></table>
+
+  <h2>Limits of this toy</h2>
+  <p class="note">EMT is a simple analytic model, not DFT, and the system is one element. The network predicts energy per atom from descriptors averaged over atoms, not a sum of per-atom contributions, and it does not predict forces. Each test set is small, and the cluster and vacancy sets are one structure type with small random displacements, so they are not a broad sample. The uncertainty is useful as a warning here, but it overestimates the error on the surface slab, so it is a warning signal, not a calibrated error bar. The first training run used a different optimizer (Adam) and converged poorly; I switched to L-BFGS and kept that result.</p>
+
+  <h2>Code</h2>
+  <p><code>mlip_demo.py</code> runs the experiment in about 20 seconds; <code>make_figures.py</code> draws the figures. Install with <code>pip install ase scikit-learn scipy matplotlib</code>.</p>
+</main>
+<script>
+fetch("results.json").then(r => r.json()).then(R => {
+  const tb = document.querySelector("#tbl tbody");
+  Object.keys(R).filter(k => !k.startsWith("_")).forEach(k => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${k}</td><td>${R[k].n}</td><td>${R[k].mae_meV_per_atom.toFixed(1)}</td><td>${R[k].mean_ensemble_std_meV.toFixed(1)}</td>`;
+    tb.appendChild(tr);
+  });
+}).catch(() => { document.getElementById("tbl").style.display = "none"; });
+</script>
+</body>
+</html>
